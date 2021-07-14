@@ -1,0 +1,13 @@
+
+name: stage2021
+dependencies:
+  - pip
+  - ffmpeg
+  - python=3.9
+  - pip:
+    - numpy==1.21.*
+    - matplotlib==3.4.*
+    - scikit-image==0.18.*
+    - tqdm==4.61.*
+    - opencv-python==4.5.*
+    - k4a==1.*
