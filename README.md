@@ -1,4 +1,4 @@
-# Stage2021
+# CalibragePython
 
 Répertoire de stage à l'été 2021 sous la direction de Lama Séoud.
 Actuellement, le répertoire permet de calibrer une caméra RGB avec calibrate.py, et d'appliquer le calibrage sur une autre image avec undistort.py.
@@ -14,7 +14,6 @@ conda env create -f environment.yml
 4. Utiliser la commande suivante pour activer l'environnement à chaque fois :
 ```bash
 conda activate stage2021 
-# Start jupyter/VS code/etc
 ```
 
 ## Utilisation
