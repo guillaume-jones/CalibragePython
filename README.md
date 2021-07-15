@@ -14,7 +14,6 @@ conda env create -f environment.yml
 4. Utiliser la commande suivante pour activer l'environnement à chaque fois :
 ```bash
 conda activate stage2021 
-# Start jupyter/VS code/etc
 ```
 
 ## Utilisation
