@@ -14,15 +14,47 @@ class NumpyEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 ## Corner finder variables
-numberOfCorners = 7 # grid assumed square (n x n)
-distanceBetweenCorners = 20 # in mm
-checkerboardSize = (numberOfCorners,numberOfCorners)
+numberOfRows = 9
+numberOfColumns = 5
+totalCircles = numberOfRows*numberOfColumns
+checkerboardSize = (numberOfRows, numberOfColumns)
+distanceBetweenRows = 20 # In mm
 # Termination criteria : 1st parameter is flag, 2nd is maximum iterations, 3rd is maximum epsilon
 criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-# Array of float32 points, like [(0,0,0), (1,0,0), (2,0,0) ... (numberOfCorners,numberOfCorners,0)]
-objectCorners = np.array([[j%numberOfCorners, np.floor(j/numberOfCorners), 0] for j in range(numberOfCorners*numberOfCorners)], np.float32)
-# Points are then multiplied by distanceBetweenCorners
-objectCorners *= distanceBetweenCorners
+# Array of float32 points
+# Last axis (z) is always 0
+# Y axis (rows) increments 0, 1, 2, ... numberOfRows-1
+# X axis (columns) increments 0, 2, 4, ... numberOfColumns*2-1, adding an extra + 1 alternating based on row
+objectCorners = np.array([[2*(x%numberOfColumns) + np.floor(x/numberOfColumns)%2, np.floor(x/numberOfColumns), 0] for x in range(totalCircles)], np.float32)
+# Points are then multiplied by distanceBetweenRows to obtain real positions
+objectCorners *= distanceBetweenRows
+
+# Blob detector
+blobParams = cv.SimpleBlobDetector_Params()
+# Thresholds used to simplify image for detector
+blobParams.minThreshold = 8
+blobParams.maxThreshold = 255
+
+# Filter by area
+blobParams.filterByArea = True
+blobParams.minArea = 36 # In pixels (circle radius 6 px)
+blobParams.maxArea = 2500 # In pixels (circle radius 50 px)
+
+# Filter by circularity
+blobParams.filterByCircularity = True
+blobParams.minCircularity = 0.1 # Weak circularity filtering for perspective (circles become ellipses)
+
+# Filter by convexity
+blobParams.filterByConvexity = True
+blobParams.minConvexity = 0.87 # Strong convexity filtering for circles
+
+# Filter by inertia
+blobParams.filterByInertia = True
+blobParams.minInertiaRatio = 0.01 # Weak elongation filtering for perspective (circles become ellipses)
+
+# Create a detector with the parameters
+blobDetector = cv.SimpleBlobDetector_create(blobParams)
+
 # Arrays to store object points and image points from all the images.
 objectPositions = [] # 3d point in real world space
 imagePositions = [] # 2d points in image plane.
@@ -69,24 +101,24 @@ while not calibrationCompleted:
         # Waits secondsToSkip between checkerboards
         if (time.time() - lastCheckerboardTime > secondsToSkip):
             # Tries to find chessboard corners
-            boardIsFound, imageCorners = cv.findChessboardCorners(grayFrame, checkerboardSize, flags=cv.CALIB_CB_ADAPTIVE_THRESH + cv.CALIB_CB_NORMALIZE_IMAGE + cv.CALIB_CB_FAST_CHECK)
+            boardIsFound, imageCorners = cv.findCirclesGrid(grayFrame, checkerboardSize, flags=cv.CALIB_CB_ASYMMETRIC_GRID, blobDetector=blobDetector)
 
             if boardIsFound == True:
                 # Refine image corners to sub-pix accuracy
-                #imageCornersSub = cv.cornerSubPix(grayFrame, imageCorners, (6,6), (-1,-1), criteria)
+                imageCornersSub = cv.cornerSubPix(grayFrame, imageCorners, (8,8), (-1,-1), criteria)
                 # Add them to permanent lists
                 objectPositions.append(objectCorners)
-                imagePositions.append(imageCorners)
+                imagePositions.append(imageCornersSub)
                 
                 # Draw and display the corners
-                cv.drawChessboardCorners(frame, checkerboardSize, imageCorners, boardIsFound)
+                cv.drawChessboardCorners(frame, checkerboardSize, imageCornersSub, boardIsFound)
 
                 # Resets time counter
                 lastCheckerboardTime = time.time()
 
         # Draws previously used checkerboards
         for pos in imagePositions:
-            points = np.array([pos[0], pos[numberOfCorners - 1], pos[numberOfCorners*numberOfCorners - 1], pos[numberOfCorners*(numberOfCorners - 1)]], np.int32)
+            points = np.array([pos[0], pos[numberOfColumns - 1], pos[totalCircles - 1], pos[numberOfColumns*(numberOfRows - 1)]], np.int32)
             cv.polylines(frame, [points], True, (20, 220, 90), 2)
 
         # Indicates how many images remain
