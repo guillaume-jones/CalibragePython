@@ -45,5 +45,6 @@ Le calibrage est stocké dans le fichier `calibrationFile.json`.
 
 Une fois le calibrage effectué, utiliser la commande suivante pour appliquer le calibrage à la caméra actuelle :
 ```
-python undistort.py
+python undistort.py [filename]
 ```
+Par défaut, le nom de fichier utilisé est `calibrationFile.json`, mais un autre fichier de même format peut y être substitué.

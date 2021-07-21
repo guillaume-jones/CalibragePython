@@ -14,31 +14,29 @@ class NumpyEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 ## Corner finder variables
-numberOfRows = 9
-numberOfColumns = 5
+numberOfRows = 12
+numberOfColumns = 12
 totalCircles = numberOfRows*numberOfColumns
 checkerboardSize = (numberOfRows, numberOfColumns)
-distanceBetweenRows = 20 # In mm
-# Termination criteria : 1st parameter is flag, 2nd is maximum iterations, 3rd is maximum epsilon
+distanceBetweenRows = 30 # In mm
+# Termination criteria for subpixel finding : 1st parameter is flag, 2nd is maximum iterations, 3rd is maximum epsilon
 criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 # Array of float32 points
 # Last axis (z) is always 0
 # Y axis (rows) increments 0, 1, 2, ... numberOfRows-1
-# X axis (columns) increments 0, 2, 4, ... numberOfColumns*2-1, adding an extra + 1 alternating based on row
-objectCorners = np.array([[2*(x%numberOfColumns) + np.floor(x/numberOfColumns)%2, np.floor(x/numberOfColumns), 0] for x in range(totalCircles)], np.float32)
-# Points are then multiplied by distanceBetweenRows to obtain real positions
-objectCorners *= distanceBetweenRows
-
+# X axis (columns) increments 0, 1, 2, ... numberOfColumns-1
+objectCorners = np.array([[x % numberOfColumns, np.floor(x / numberOfColumns), 0] for x in range(totalCircles)], np.float32)
 # Blob detector
 blobParams = cv.SimpleBlobDetector_Params()
+blobParams.minDistBetweenBlobs = 4
 # Thresholds used to simplify image for detector
-blobParams.minThreshold = 8
-blobParams.maxThreshold = 255
+blobParams.minThreshold = 30
+blobParams.maxThreshold = 240 
 
 # Filter by area
 blobParams.filterByArea = True
-blobParams.minArea = 36 # In pixels (circle radius 6 px)
-blobParams.maxArea = 2500 # In pixels (circle radius 50 px)
+blobParams.minArea = 25 # In pixels (circle diameter 5 px)
+blobParams.maxArea = 10000 # In pixels
 
 # Filter by circularity
 blobParams.filterByCircularity = True
@@ -46,7 +44,7 @@ blobParams.minCircularity = 0.1 # Weak circularity filtering for perspective (ci
 
 # Filter by convexity
 blobParams.filterByConvexity = True
-blobParams.minConvexity = 0.87 # Strong convexity filtering for circles
+blobParams.minConvexity = 0.94 # Strong convexity filtering for circles
 
 # Filter by inertia
 blobParams.filterByInertia = True
@@ -62,72 +60,84 @@ imagePositions = [] # 2d points in image plane.
 secondsToSkip = 2
 lastCheckerboardTime = time.time()
 # Maximum number of checkerboard images to obtain
-maximumCalibrationImages = 40
+maximumCalibrationImages = 30
 # Minimum number of checkerboard images to calculate matrices after removing outliers
 minimumCalibrationImages = maximumCalibrationImages - 5
 # Maximum error to tolerate on each point, in pixels
-maximumPointError = 2
+maximumPointError = 10
+# Maximum distance within volume of calibration, in meters
+maximumDistance = 5
 
 # Initial message to user
 print("Press q to exit program.")
 
 # Open camera
-cap = cv.VideoCapture(0)
-if not cap.isOpened():
-    sys.exit("Cannot open camera.")
-# Open camera, k4a style
-#kinect = k4a.PyK4A(k4a.Config(
-#           color_resolution=k4a.ColorResolution.RES_720P,
-#           depth_mode=k4a.DepthMode.NFOV_UNBINNED,
-#           synchronized_images_only=True,
-#         ))
-#kinect.start()
+kinect = k4a.PyK4A(k4a.Config(
+            color_format=k4a.ImageFormat.COLOR_BGRA32,
+            color_resolution=k4a.ColorResolution.RES_720P,
+            depth_mode=k4a.DepthMode.NFOV_UNBINNED,
+            camera_fps=k4a.FPS.FPS_30,
+            synchronized_images_only=True,
+            ))
+kinect.start()
+#kinect.whitebalance = 2800
 
 calibrationCompleted = False
 while not calibrationCompleted:
     while len(imagePositions) < maximumCalibrationImages:
         # Capture frame-by-frame
-        frameIsRead, frame = cap.read()
-        if not frameIsRead:
-            cap.release()
+        capture = kinect.get_capture()
+        if not np.any(capture):
+            kinect.stop()
             cv.destroyAllWindows()
             sys.exit("Camera disconnnected, not enough frames taken for calibration.")
-        
-        #frame = np.array(kinect.get_capture())
-
+        # obtains rgb and depth frames
+        rgbFrame = capture.color
+        depthFrame = capture.depth.clip(0, 600*maximumDistance) # Clips depth capture for better normalization
         # Makes frame gray
-        grayFrame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        rgbGrayFrame = cv.cvtColor(rgbFrame, cv.COLOR_BGR2GRAY)
+        # Normalize gray frame between 0 and 255, using dtype CV_8U for standard grayscale
+        depthGrayFrame = cv.normalize(depthFrame, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
+        # Obtain colored depth frame for better visualisation
+        depthColorFrame = cv.applyColorMap(cv.bitwise_not(depthGrayFrame), cv.COLORMAP_JET)
+        
+        grayFrame = rgbGrayFrame
+        frame = rgbFrame
 
         # Waits secondsToSkip between checkerboards
         if (time.time() - lastCheckerboardTime > secondsToSkip):
+            # Detects blobs and draws them on the frame
+            keypoints = blobDetector.detect(grayFrame)
+            frame = cv.drawKeypoints(frame, keypoints, np.array([]), (255, 255, 255), cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
             # Tries to find chessboard corners
-            boardIsFound, imageCorners = cv.findCirclesGrid(grayFrame, checkerboardSize, flags=cv.CALIB_CB_ASYMMETRIC_GRID, blobDetector=blobDetector)
+            boardIsFound, imageCorners = cv.findCirclesGrid(grayFrame, checkerboardSize, flags=cv.CALIB_CB_SYMMETRIC_GRID+cv.CALIB_CB_CLUSTERING, blobDetector=blobDetector)
 
             if boardIsFound == True:
-                # Refine image corners to sub-pix accuracy
-                imageCornersSub = cv.cornerSubPix(grayFrame, imageCorners, (8,8), (-1,-1), criteria)
                 # Add them to permanent lists
                 objectPositions.append(objectCorners)
-                imagePositions.append(imageCornersSub)
-                
-                # Draw and display the corners
-                cv.drawChessboardCorners(frame, checkerboardSize, imageCornersSub, boardIsFound)
+                imagePositions.append(imageCorners)
 
                 # Resets time counter
                 lastCheckerboardTime = time.time()
 
         # Draws previously used checkerboards
-        for pos in imagePositions:
-            points = np.array([pos[0], pos[numberOfColumns - 1], pos[totalCircles - 1], pos[numberOfColumns*(numberOfRows - 1)]], np.int32)
-            cv.polylines(frame, [points], True, (20, 220, 90), 2)
+        for index, pos in enumerate(imagePositions):
+            points = np.array([pos[0], pos[numberOfColumns - 1], pos[totalCircles - 1], pos[numberOfColumns*(numberOfRows - 1)]], np.int32) 
+            if index == len(imagePositions) -1:
+                poylgonColor = (240, 20, 20)
+            else:
+                poylgonColor = (20, 220, 90)
+            cv.polylines(frame, [points], True, poylgonColor, 2)
 
         # Indicates how many images remain
-        cv.putText(frame, 'Remaining images: ' + str(maximumCalibrationImages - len(imagePositions)), (50, 80), cv.FONT_HERSHEY_SIMPLEX, 1, (80, 250, 55), 2)
+        textColor = (80, 250, 55)
+        cv.putText(frame, 'Remaining images: ' + str(maximumCalibrationImages - len(imagePositions)), (50, 50), cv.FONT_HERSHEY_SIMPLEX, 1, textColor, 2)
         
-        cv.imshow('img', frame)
+        cv.imshow('frame', frame)
         ## Waits 25 ms for next frame or quits main loop if 'q' is pressed
         if cv.waitKey(25) == ord('q'):
-            cap.release()
+            kinect.stop()
             cv.destroyAllWindows()
             sys.exit("User exited program.")
 
@@ -135,7 +145,7 @@ while not calibrationCompleted:
     while not calibrationCalculated:
         # Calculates calibration matrices from positions
         if len(imagePositions) > minimumCalibrationImages:
-            retroprojectionError, cameraMatrix, distortion, rotation, translation = cv.calibrateCamera(objectPositions, imagePositions, grayFrame.shape[::-1], None, None)
+            retroprojectionError, cameraMatrix, distortion, rotation, translation = cv.calibrateCamera(objectPositions, imagePositions, grayFrame.shape[::-1], None, None, flags=cv.CALIB_RATIONAL_MODEL+cv.CALIB_ZERO_TANGENT_DIST)
             calibrationCalculated = True
         else:
             # Returns to image taking
@@ -171,6 +181,13 @@ while not calibrationCompleted:
         # If all errors have been checked and no outliers found, calibration is complete
         calibrationCompleted = calibrationCalculated
 
+# Outputs calibration matrices to file
+with open('calibrationFile2.json', 'w') as file:
+    # Assigns labels to values to make JSON readable
+    dumpDictionary = {'Format' : 'OpenCV', 'Model' : 'Rational','CameraMatrix' : cameraMatrix, 'DistortionCoefficients' : distortion[0:7]}
+    # Uses NumpyEncoder to convert numpy values to regular arrays for json.dump
+    json.dump(dumpDictionary, file, indent=4, cls=NumpyEncoder)
+
 # Command line error prints
 print("Retroprojection error :", retroprojectionError)
 print("X error absolute mean, variance:", np.mean(np.abs(xError)), ',', np.var(xError))
@@ -192,13 +209,6 @@ colorBar.ax.set_ylabel('Absolute error')
 plt.axis('scaled')
 plt.show()
 
-# Outputs calibration matrices to file
-with open('calibrationFile.json', 'w') as file:
-    # Assigns labels to values to make JSON readable
-    dumpDictionary = {'Format' : 'OpenCV', 'CameraMatrix' : cameraMatrix, 'DistortionCoefficients' : distortion}
-    # Uses NumpyEncoder to convert numpy values to regular arrays for json.dump
-    json.dump(dumpDictionary, file, indent=4, cls=NumpyEncoder)
-
 # Release the camera and window
-cap.release()
+kinect.stop()
 cv.destroyAllWindows()

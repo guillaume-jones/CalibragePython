@@ -21,7 +21,6 @@ checkerboardSize = (numberOfCorners,numberOfCorners)
 criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 # Array of float32 points, like [(0,0,0), (1,0,0), (2,0,0) ... (numberOfCorners,numberOfCorners,0)]
 objectCorners = np.array([[j%numberOfCorners, np.floor(j/numberOfCorners), 0] for j in range(numberOfCorners*numberOfCorners)], np.float32)
-# Points are then multiplied by distanceBetweenCorners
 objectCorners *= distanceBetweenCorners
 # Arrays to store object points and image points from all the images.
 objectPositions = [] # 3d point in real world space
@@ -161,7 +160,7 @@ plt.axis('scaled')
 plt.show()
 
 # Outputs calibration matrices to file
-with open('calibrationFile.json', 'w') as file:
+with open('calibrationFile2.json', 'w') as file:
     # Assigns labels to values to make JSON readable
     dumpDictionary = {'Format' : 'OpenCV', 'CameraMatrix' : cameraMatrix, 'DistortionCoefficients' : distortion}
     # Uses NumpyEncoder to convert numpy values to regular arrays for json.dump
